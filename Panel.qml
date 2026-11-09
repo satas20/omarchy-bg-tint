@@ -10,14 +10,14 @@ import "Model.js" as Model
 // CLI and this panel share one source of truth.
 Panel {
   id: root
-  moduleName: "satas.bg-tint"
-  ipcTarget: "satas.bg-tint"
+  moduleName: "io.github.satas20.bg-tint"
+  ipcTarget: "io.github.satas20.bg-tint"
 
   readonly property color fg: bar ? bar.foreground : Color.foreground
   readonly property color dim: Qt.darker(fg, 1.4)
   readonly property string ff: bar ? bar.fontFamily : Style.font.family
   readonly property string home: Quickshell.env("HOME")
-  readonly property string bin: home + "/.config/omarchy/plugins/satas.bg-tint/bin/bg-tint"
+  readonly property string bin: home + "/.config/omarchy/plugins/io.github.satas20.bg-tint/bin/bg-tint"
 
   property var state: Model.parseState("")
   property var cfg: ({})

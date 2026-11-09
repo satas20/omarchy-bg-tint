@@ -1,4 +1,4 @@
-# satas.bg-tint — theme-matched wallpapers for Omarchy
+# Background Tint — theme-matched wallpapers for Omarchy
 
 A `bar-widget` plugin for `omarchy-shell`. Point it at a folder of any images
 (space photos, landscapes, art) and it recolours them into the active theme's
@@ -48,8 +48,8 @@ mkdir -p ~/Pictures/wallpapers/src    # drop images here
 Requirements beyond stock Omarchy: `lutgen`. ImageMagick (`magick`) ships with
 Omarchy.
 
-Update with `omarchy plugin update satas.bg-tint`; remove with
-`omarchy plugin remove satas.bg-tint` (then optionally delete
+Update with `omarchy plugin update io.github.satas20.bg-tint`; remove with
+`omarchy plugin remove io.github.satas20.bg-tint` (then optionally delete
 `~/.config/omarchy/bg-tint.conf` and the `tint-*.jpg` files under
 `~/.config/omarchy/backgrounds/`).
 
@@ -57,7 +57,7 @@ Optional keybind:
 
 ```lua
 -- ~/.config/hypr/bindings.lua
-o.bind("SUPER + ALT + B", "Background tint", "omarchy-shell satas.bg-tint toggle")
+o.bind("SUPER + ALT + B", "Background tint", "omarchy-shell io.github.satas20.bg-tint toggle")
 ```
 
 ## CLI
@@ -65,7 +65,7 @@ o.bind("SUPER + ALT + B", "Background tint", "omarchy-shell satas.bg-tint toggle
 The panel drives `bin/bg-tint`, which also works standalone:
 
 ```bash
-bg=~/.config/omarchy/plugins/satas.bg-tint/bin/bg-tint
+bg=~/.config/omarchy/plugins/io.github.satas20.bg-tint/bin/bg-tint
 $bg config                          # show settings
 $bg config STRENGTH 80 COLORS ''    # '' = all colours
 $bg preview                         # render a preview, print its path
