@@ -1,0 +1,190 @@
+#!/bin/bash
+# Recolor source wallpapers into the active Omarchy theme palette with lutgen.
+#
+#   bg-tint state                   tab-separated snapshot for the shell panel
+#   bg-tint config [KEY VALUE...]   print config, or persist keys
+#   bg-tint preview [SRC]           render a small preview, print its path
+#   bg-tint generate [--set] [--auto] [--force]
+#       --set   switch to the first tinted image afterwards
+#       --auto  theme-switch mode: switch only when AUTO_SET=1
+#
+# Config (~/.config/omarchy/bg-tint.conf): SRC dir, STRENGTH 0-100, COLORS
+# (comma-separated colors.toml keys, empty = all), PRESERVE 0/1, AUTO_SET 0/1.
+set -euo pipefail
+
+PATH="$HOME/.cargo/bin:$PATH"
+CONF="$HOME/.config/omarchy/bg-tint.conf"
+STATE="$HOME/.local/state/omarchy/current"
+BG_LINK="$STATE/background"
+KEYS=(SRC STRENGTH COLORS PRESERVE AUTO_SET)
+MAX_WIDTH=3840
+PREVIEW_WIDTH=1280
+PREVIEW_DIR="${XDG_RUNTIME_DIR:-/tmp}/bg-tint"
+
+SRC="$HOME/Pictures/wallpapers/src"
+STRENGTH=100
+COLORS=""
+PRESERVE=1
+AUTO_SET=1
+[[ -f $CONF ]] && source "$CONF"
+
+die() { echo "bg-tint: $*" >&2; exit 1; }
+
+THEME="$(cat "$STATE/theme.name" 2>/dev/null)" || die "no current theme"
+OUT="$HOME/.config/omarchy/backgrounds/$THEME"
+TMP="$(mktemp -d)"
+trap 'rm -rf "$TMP"' EXIT
+
+# colors.toml order, deduped by hex (color8-15 usually repeat 0-7).
+palette() {
+  awk -F'"' '
+    /^(background|foreground|accent|color[0-9]+) *=/ { split($1, k, " *= *"); hex=tolower($2); if (!(hex in seen)) { seen[hex]=1; print k[1], hex } }
+  ' "$STATE/theme/colors.toml"
+}
+
+sources() {
+  [[ -d $SRC ]] || return 0
+  find -L "$SRC" -maxdepth 1 -type f \( -iname '*.jpg' -o -iname '*.jpeg' -o -iname '*.png' -o -iname '*.webp' \) | sort
+}
+
+selected_hexes() {
+  local key hex
+  while read -r key hex; do
+    if [[ -z $COLORS || ",$COLORS," == *",$key,"* ]]; then echo "$hex"; fi
+  done < <(palette)
+}
+
+# Output names embed a hash of palette+settings, so a re-tint yields a new path
+# (the shell ignores `background set` for an unchanged path).
+HEXES=()
+VERSION=""
+prepare() {
+  command -v lutgen >/dev/null || die "lutgen missing: omarchy pkg aur add lutgen-bin (or cargo install lutgen-cli)"
+  mapfile -t HEXES < <(selected_hexes)
+  (( ${#HEXES[@]} >= 2 )) || die "select at least 2 colours"
+  VERSION="$(printf '%s ' "$PIPELINE" "${HEXES[@]}" "$STRENGTH" "$PRESERVE" | sha1sum | cut -c1-8)"
+}
+
+# Low shape + all colours = soft blends; lutgen defaults (-s 128 -n 16) posterize nebulae into flat blobs.
+PIPELINE="rbf-s48-n0-l12-chroma1.5-clamp"
+clut() {
+  local out="$TMP/clut.png" args=(-R -s 48 -n 0 -l 12)
+  (( PRESERVE )) && args+=(-P)
+  [[ -f $out ]] || lutgen generate "${args[@]}" -o "$out" -- "${HEXES[@]}" >"$TMP/log" 2>&1 || die "lutgen: $(<"$TMP/log")"
+  echo "$out"
+}
+
+render() {
+  local src="$1" dst="$2" width="$3" blend=(-delete 0)
+  (( STRENGTH < 100 )) && blend=(-compose blend -define "compose:args=$STRENGTH" -composite)
+  # -clamp: HDRI resize ringing leaves negative values near black; -hald-clut wraps them into bright glyph-like specks.
+  # Chroma-only blur kills JPEG colour noise (the LUT turns it into fake stars); luma/stars stay sharp.
+  # stack [orig, tinted]; blend keeps STRENGTH% of tinted
+  magick -define "jpeg:size=$((width * 2))x$((width * 2))" "$src" -auto-orient -resize "${width}x>" -clamp -strip \
+    \( +clone -colorspace YCbCr -channel G,B -blur 0x1.5 +channel -colorspace sRGB -clamp "$(clut)" -hald-clut \) \
+    "${blend[@]}" -sampling-factor 4:4:4 -quality 95 "$dst.part.jpg"
+  mv "$dst.part.jpg" "$dst"
+}
+
+stem() { local b="${1##*/}"; echo "${b%.*}"; }
+
+cmd_state() {
+  local key hex
+  printf 'theme\t%s\n' "$THEME"
+  printf 'current\t%s\n' "$(readlink "$BG_LINK" 2>/dev/null || true)"
+  for key in "${KEYS[@]}"; do printf 'cfg\t%s\t%s\n' "$key" "${!key}"; done
+  while read -r key hex; do printf 'color\t%s\t%s\n' "$key" "$hex"; done < <(palette)
+  while read -r f; do printf 'src\t%s\n' "$f"; done < <(sources)
+  for f in "$OUT"/tint-*.jpg; do [[ -e $f ]] && printf 'out\t%s\n' "$f"; done
+  return 0
+}
+
+cmd_config() {
+  local key
+  if (( $# == 0 )); then
+    for key in "${KEYS[@]}"; do printf '%s=%s\n' "$key" "${!key}"; done
+    return
+  fi
+  while (( $# )); do
+    key="${1^^}"
+    [[ " ${KEYS[*]} " == *" $key "* ]] || die "unknown key: $1"
+    printf -v "$key" '%s' "${2-}"
+    shift $(( $# >= 2 ? 2 : 1 ))
+  done
+  mkdir -p "${CONF%/*}"
+  for key in "${KEYS[@]}"; do printf '%s=%q\n' "$key" "${!key}"; done >"$CONF.part"
+  mv "$CONF.part" "$CONF"
+}
+
+cmd_preview() {
+  local src="${1:-$(sources | sed -n 1p)}"
+  [[ -f $src ]] || die "no source image"
+  prepare
+  mkdir -p "$PREVIEW_DIR"
+  rm -f "$PREVIEW_DIR"/preview-*.jpg
+  local dst="$PREVIEW_DIR/preview-$VERSION-$(stem "$src")-$(date +%s%N).jpg"
+  render "$src" "$dst" "$PREVIEW_WIDTH"
+  echo "$dst"
+}
+
+cmd_generate() {
+  local set_bg=0 auto=0 force=0
+  while (( $# )); do
+    case $1 in
+      --set) set_bg=1 ;;
+      --auto) auto=1 ;;
+      --force) force=1 ;;
+      *) die "unknown flag: $1" ;;
+    esac
+    shift
+  done
+  mkdir -p "$PREVIEW_DIR"
+  exec 9>"$PREVIEW_DIR/generate.lock"
+  flock 9
+  prepare
+  mapfile -t srcs < <(sources)
+  (( ${#srcs[@]} )) || die "no source images in $SRC"
+  mkdir -p "$OUT"
+
+  local current; current="$(readlink "$BG_LINK" 2>/dev/null || true)"
+  local n=0 tinted=0 first="" follow="" keep=()
+  for src in "${srcs[@]}"; do
+    n=$((n + 1))
+    local s; s="$(stem "$src")"
+    local dst="$OUT/tint-$s-$VERSION.jpg"
+    keep+=("$dst")
+    if (( force )) || [[ ! -f $dst || $src -nt $dst ]]; then
+      echo "[$n/${#srcs[@]}] tint $s"
+      render "$src" "$dst" "$MAX_WIDTH"
+      tinted=$((tinted + 1))
+    else
+      echo "[$n/${#srcs[@]}] skip $s"
+    fi
+    [[ -z $first ]] && first="$dst"
+    [[ $current == "$OUT/tint-$s-"* ]] && follow="$dst"
+  done
+
+  for f in "$OUT"/tint-*.jpg; do
+    [[ -e $f && " ${keep[*]} " != *" $f "* ]] && rm -f "$f"
+  done
+
+  local target=""
+  if (( set_bg )); then
+    target="${follow:-$first}"
+  elif (( auto )) && (( AUTO_SET )); then
+    target="${follow:-$first}"
+    [[ $target == "$current" ]] && target=""
+  elif [[ -n $follow && $follow != "$current" ]]; then
+    target="$follow"
+  fi
+  [[ -n $target ]] && omarchy-theme-bg-set "$target"
+  echo "done: $tinted tinted → $OUT"
+}
+
+case "${1-}" in
+  state) cmd_state ;;
+  config) shift; cmd_config "$@" ;;
+  preview) shift; cmd_preview "$@" ;;
+  generate) shift; cmd_generate "$@" ;;
+  *) sed -n '2,12p' "$0" >&2; exit 1 ;;
+esac

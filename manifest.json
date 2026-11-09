@@ -1,0 +1,22 @@
+{
+  "schemaVersion": 1,
+  "id": "satas.bg-tint",
+  "name": "Background Tint",
+  "version": "1.0.0",
+  "author": "satas",
+  "license": "MIT",
+  "description": "Recolours your own wallpapers into the current theme palette with lutgen; retints on theme switch",
+  "kinds": [
+    "bar-widget"
+  ],
+  "entryPoints": {
+    "barWidget": "Panel.qml"
+  },
+  "barWidget": {
+    "displayName": "Background Tint",
+    "description": "Theme-matched wallpapers from any image folder",
+    "category": "Appearance",
+    "allowMultiple": false,
+    "defaultSection": "right"
+  }
+}
